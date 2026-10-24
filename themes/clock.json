@@ -1,0 +1,26 @@
+{
+  "id": "clock",
+  "name": "圆形时钟",
+  "author": "示例皮肤",
+  "vars": {
+    "bg":          "#f6f4ec",
+    "bg2":         "#faf8f1",
+    "panel":       "#fbf9f2",
+    "card":        "#f4f1e6",
+    "card_hover":  "#ece8d9",
+    "chip":        "#e9e4d2",
+    "accent_soft": "#e6e0cb",
+    "accent":      "#a8926b",
+    "accent_deep": "#87714c",
+    "ink":         "#4f4639",
+    "ink_soft":    "#73685a",
+    "muted":       "#a2967f",
+    "line":        "#e2dbca",
+    "border":      "#d5cbb2",
+    "due":         "#a4765a",
+    "danger":      "#b58a7a",
+    "ok":          "#8ba07a",
+    "scrollbar":   "#d3c7ab",
+    "title":       "待办"
+  }
+}

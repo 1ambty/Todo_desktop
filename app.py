@@ -159,6 +159,21 @@ def selftest():
     for theme in [t["id"] for t in app._themes_cache]:
         app.apply_theme(theme); root.update()
     app.apply_theme("sage")
+    # 皮肤脚本:圆形时钟应绑定 draw 钩子并改窗体;切回后完全卸载
+    assert "clock" in [t["id"] for t in app._themes_cache], "皮肤主题未被扫描到"
+    app.apply_theme("clock")
+    assert app.skin == "clock" and "draw_surface" in app._skin_bound, "皮肤钩子未绑定"
+    assert app.win_radius == 180, "皮肤未生效窗体形状"
+    for i in range(10):
+        root.update()
+    app.apply_theme("sage")
+    assert app.skin is None and app.win_radius == 16 and not app._skin_bound, \
+        "皮肤未完全卸载"
+    for i in range(10):
+        root.update()
+    # 时钟皮肤把窗口改小过,恢复默认尺寸,保证后续点击用例的列表可视范围
+    app.set_window_shape(w=360, h=620)
+    root.update()
     app.store.toggle(store.get(t1["id"])["id"])  # 打勾
     app.draw(); root.update()
     app.toast("测试提示", action=("del", 9999)); root.update()
@@ -175,12 +190,16 @@ def selftest():
     assert total >= 3, "今日进度统计异常"
 
     # ---- 合成点击走真实交互链路 ----
-    def click_tag(tag):
+    def click_tag(tag, expect=None):
         items = app.canvas.find_withtag(tag)
         if not items:
+            print("  [click] 目标不存在:", tag)
             return False
         x1, y1, x2, y2 = app.canvas.bbox(items[0])
         cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        picked = app._pick(cx, cy)
+        if expect and picked != expect:
+            print("  [click] 命中不符: 想点 %s, 实际 %s @(%d,%d)" % (tag, picked, cx, cy))
         app.canvas.event_generate("<Button-1>", x=cx, y=cy)
         app.canvas.event_generate("<ButtonRelease-1>", x=cx, y=cy)
         root.update()
@@ -236,6 +255,28 @@ def selftest():
     app.entry.insert(0, "自检新增任务")
     app.add_quick()
     assert any(t["title"] == "自检新增任务" for t in store.tasks), "快速添加未生效"
+
+    # 回归:异形皮肤下必须能打开设置并切回普通主题(皮肤 draw 不得吞掉弹窗层)
+    app.apply_theme("clock")
+    for i in range(8):
+        root.update()
+    app.state["modal"] = "settings"
+    app.draw()
+    root.update()
+    assert app.state["modal"] == "settings" and click_tag("theme:sage"), \
+        "时钟皮肤下设置/主题卡不可用"
+    assert app.skin is None and app.win_radius == 16, "时钟下无法切回普通主题"
+    # 重置窗口:大小+位置一起恢复默认(按钮在面板下部,先滚下去)
+    app.set_window_shape(radius=60, w=420, h=520)
+    app.state["modal"] = "settings"
+    app.state["sm_scroll"] = 320
+    app.draw()
+    root.update()
+    assert click_tag("act:sm-resetwin", expect="act:sm-resetwin"), "重置按钮不可用"
+    assert app.geo["w"] == 360 and app.geo["h"] == 620, "窗口重置未生效"
+    app.apply_theme("sage")
+    app.close_modal()
+    root.update()
 
     root.destroy()
     print("SELFTEST PASS: 主题 %d 个,任务 %d 项,今日进度 %d/%d,交互链路 OK"

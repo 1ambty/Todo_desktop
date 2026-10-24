@@ -66,29 +66,83 @@ def _merge(t):
 
 
 def scan_themes():
-    """内置主题 + themes/*.json 插件,返回 (主题列表, 无效文件名列表)。"""
+    """内置主题 + themes/ 插件,返回 (主题列表, 无效文件名列表)。
+
+    插件两种形态:
+      <id>.json            纯配色主题
+      <id>.json + <id>.py  配色 + 皮肤脚本(可覆盖绘制函数,异形 UI)
+      <id>.py              纯皮肤脚本,文件内自带 SKIN = {id, name, vars} 元数据
+    """
     themes = [_merge(dict(t)) for t in BUILTIN_THEMES]
     bad = []
     seen = {t["id"] for t in themes}
     if os.path.isdir(THEMES_DIR):
         for fn in sorted(os.listdir(THEMES_DIR)):
-            if not fn.lower().endswith(".json"):
-                continue
+            stem, ext = os.path.splitext(fn)
+            ext = ext.lower()
             path = os.path.join(THEMES_DIR, fn)
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                data["_file"] = path
-                if not isinstance(data, dict):
-                    raise ValueError("主题必须是 JSON 对象")
-                data.setdefault("id", os.path.splitext(fn)[0])
-                if data["id"] in seen:      # 与内置同名 → 允许覆盖内置
-                    themes = [t for t in themes if t["id"] != data["id"]]
-                themes.append(_merge(data))
-                seen.add(data["id"])
-            except Exception as e:
-                bad.append("%s(%s)" % (fn, e))
+            if ext == ".json":
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    data["_file"] = path
+                    if not isinstance(data, dict):
+                        raise ValueError("主题必须是 JSON 对象")
+                    data.setdefault("id", stem)
+                    if data["id"] in seen:      # 与内置同名 → 允许覆盖内置
+                        themes = [t for t in themes if t["id"] != data["id"]]
+                    entry = _merge(data)
+                    skin_path = os.path.join(THEMES_DIR, stem + ".py")
+                    if os.path.exists(skin_path):
+                        entry["skin_file"] = skin_path
+                    themes.append(entry)
+                    seen.add(entry["id"])
+                except Exception as e:
+                    bad.append("%s(%s)" % (fn, e))
+            elif ext == ".py" and not os.path.exists(os.path.join(THEMES_DIR, stem + ".json")):
+                # 纯皮肤脚本:执行以读取 SKIN 元数据(出错仅剔除该主题,不影响主程序)
+                try:
+                    ns = run_skin_file(path)
+                    meta = ns.get("SKIN") or {}
+                    entry = _merge({"id": meta.get("id") or stem,
+                                    "name": meta.get("name") or stem,
+                                    "author": meta.get("author", ""),
+                                    "vars": meta.get("vars") or {}})
+                    entry["skin_file"] = path
+                    if entry["id"] in seen:
+                        themes = [t for t in themes if t["id"] != entry["id"]]
+                    themes.append(entry)
+                    seen.add(entry["id"])
+                except Exception as e:
+                    bad.append("%s(%s)" % (fn, e))
     return themes, bad
+
+
+def run_skin_file(path):
+    """执行皮肤脚本,返回其命名空间(脚本出错抛异常,由调用方处理)。"""
+    ns = {"__name__": "todo_skin_" + os.path.splitext(os.path.basename(path))[0],
+          "__file__": path}
+    with open(path, "r", encoding="utf-8") as f:
+        code = f.read()
+    exec(compile(code, path, "exec"), ns)
+    return ns
+
+
+def load_skin(entry):
+    """执行皮肤脚本,收集钩子 {name: fn} 后交给 UI 绑定。
+
+    钩子:所有 draw_* 前缀函数(覆盖 TodoApp 同名绘制方法)与 on_apply。
+    无皮肤文件返回 {}。
+    """
+    path = entry.get("skin_file")
+    if not path:
+        return {}
+    ns = run_skin_file(path)
+    hooks = {}
+    for k, v in ns.items():
+        if callable(v) and (k == "on_apply" or k == "draw" or k.startswith("draw_")):
+            hooks[k] = v
+    return hooks
 
 
 def get_theme(tid):

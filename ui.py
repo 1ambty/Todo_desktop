@@ -7,6 +7,7 @@
 import datetime
 import json
 import os
+import types
 import calendar
 import time
 import tkinter as tk
@@ -118,6 +119,13 @@ class TodoApp:
         self.card_geo = {}
         self._today = today_str()
         self._themes_cache = theme_api.scan_themes()[0]
+        # 皮肤脚本(异形 UI):见 themes/README.md
+        self._req_geo = None     # 最近一次请求的窗口几何 (w,h,x,y) —— 几何唯一真相源
+        self.win_radius = 16     # 窗体圆角(px,皮肤可改)
+        self.skin = None         # 当前皮肤主题 id,无皮肤为 None
+        self.skin_hooks = {}
+        self.skin_error = None
+        self._skin_bound = []    # 已绑定的钩子名,切主题时卸载
 
         root.overrideredirect(True)
         root.attributes("-transparentcolor", TRANS_KEY)
@@ -159,6 +167,7 @@ class TodoApp:
         root.update_idletasks()
         self.W = root.winfo_width()
         self.H = root.winfo_height()
+        self._apply_skin(self.T)
         self.draw()
 
         if not start_hidden and store.settings.get("notify_due"):
@@ -221,8 +230,13 @@ class TodoApp:
     def _save_window_cfg(self):
         try:
             g = self.geo
-            g["x"], g["y"] = self.root.winfo_x(), self.root.winfo_y()
-            g["w"], g["h"] = self.root.winfo_width(), self.root.winfo_height()
+            # 用自己维护的"请求几何"作为唯一真相源:root.geometry() 读回值
+            # 和 winfo 尺寸在刚发出请求时都是旧值,会把刚设置的大小覆盖回去
+            if getattr(self, "_req_geo", None):
+                g["w"], g["h"], g["x"], g["y"] = self._req_geo
+            else:
+                g["x"], g["y"] = self.root.winfo_x(), self.root.winfo_y()
+                g["w"], g["h"] = self.root.winfo_width(), self.root.winfo_height()
             os.makedirs(DATA_DIR, exist_ok=True)
             with open(WINDOW_FILE, "w", encoding="utf-8") as f:
                 json.dump(g, f, ensure_ascii=False)
@@ -231,7 +245,17 @@ class TodoApp:
 
     def _apply_geometry(self):
         g = self.geo
-        self.root.geometry("%dx%d+%d+%d" % (g["w"], g["h"], g["x"], g["y"]))
+        self._req_geo = (int(g["w"]), int(g["h"]), int(g["x"]), int(g["y"]))
+        self.root.geometry("%dx%d+%d+%d" % self._req_geo)
+
+    def _move_to(self, nx, ny):
+        """拖动移动:保持尺寸,更新位置(同步维护请求几何)。"""
+        if self._req_geo:
+            w, h = self._req_geo[0], self._req_geo[1]
+        else:
+            w, h = self.root.winfo_width(), self.root.winfo_height()
+        self._req_geo = (int(w), int(h), int(nx), int(ny))
+        self.root.geometry("%dx%d+%d+%d" % self._req_geo)
 
     def _apply_topmost(self):
         self.root.attributes("-topmost", bool(self.geo["topmost"]))
@@ -411,11 +435,60 @@ class TodoApp:
         self.entry.config(fg=self.V["ink"] if not self._entry_placeholder else self.V["muted"])
         self.search_entry.config(fg=self.V["ink"] if not self._search_placeholder else self.V["muted"])
         self._themes_cache = theme_api.scan_themes()[0]
+        self._apply_skin(self.T)
+
+    def _apply_skin(self, entry):
+        """绑定主题皮肤脚本(可覆盖 draw_* 与 on_apply);出错自动回落默认绘制。"""
+        # 先卸载上一张皮肤的实例方法,形状参数复位(新皮肤 on_apply 可再改)
+        for name in self._skin_bound:
+            try:
+                delattr(self, name)
+            except AttributeError:
+                pass
+        self._skin_bound = []
+        self.skin_hooks = {}
+        self.skin_error = None
+        self.skin = None
+        self.win_radius = 16
+        try:
+            hooks = theme_api.load_skin(entry)
+        except Exception as ex:
+            self.skin_error = "%s" % ex
+            return
+        if not hooks:
+            return
+        for name, fn in hooks.items():
+            # 皮肤的 draw 只接管主界面层,弹窗(设置/编辑/日历/提示)始终由主程序绘制,
+            # 否则异形皮肤会把用户困住出不了设置
+            target = "draw_surface" if name == "draw" else name
+            setattr(self, target, types.MethodType(fn, self))
+            self._skin_bound.append(target)
+        self.skin = entry.get("id")
+        if hooks.get("on_apply"):
+            try:
+                hooks["on_apply"](self)
+            except Exception as ex:
+                self.skin_error = "on_apply: %s" % ex
+
+    def set_window_shape(self, radius=None, w=None, h=None):
+        """皮肤脚本用:调整窗体圆角与默认尺寸。"""
+        if radius is not None:
+            self.win_radius = int(radius)
+        if w or h:
+            g = self.geo
+            g["w"] = int(clamp(w or g["w"], MIN_W, MAX_W))
+            g["h"] = int(clamp(h or g["h"], MIN_H, MAX_H))
+            self._apply_geometry()
+            self._save_window_cfg()
+        self.draw()
 
     def apply_theme(self, tid):
         self.store.settings["theme"] = tid
         self.store.save_later()
         self._refresh_theme()
+        if self.skin_error:
+            self.toast("皮肤脚本出错,已回退默认绘制(%s)"
+                       % self.skin_error.strip().splitlines()[-1][:44])
         self.draw()
 
     def rescan_themes(self):
@@ -645,15 +718,18 @@ class TodoApp:
             except Exception:
                 self.toast("无法打开文件夹")
         elif rest == "resetwin":
-            self.geo = self._load_window_cfg()
+            # 大小和位置一起恢复默认(此前只重置位置,窗口在默认处时看起来像没反应)
             sw = self.root.winfo_screenwidth()
             sh = self.root.winfo_screenheight()
-            self.geo["x"] = sw - self.geo["w"] - 48
-            self.geo["y"] = max(40, (sh - self.geo["h"]) // 2 - 60)
+            self.geo["w"], self.geo["h"] = 360, 620
+            self.geo["x"] = sw - 360 - 48
+            self.geo["y"] = max(40, (sh - 620) // 2 - 60)
+            self.state["scroll"] = 0
             self._apply_geometry()
             self._apply_topmost()
             self._apply_opacity()
             self._save_window_cfg()
+            self.toast("窗口大小与位置已重置")
             self.draw()
         elif rest == "clear-done":
             n = self.store.clear_done()
@@ -1004,7 +1080,7 @@ class TodoApp:
             if d["kind"] == "resize":
                 self.do_resize(e)
             elif d["kind"] == "move":
-                self.root.geometry("+%d+%d" % (e.x_root - d["dx"], e.y_root - d["dy"]))
+                self._move_to(e.x_root - d["dx"], e.y_root - d["dy"])
             elif d["kind"] == "opacity":
                 self.set_opacity_from_x(x)
             elif d["kind"] == "task":
@@ -1051,8 +1127,8 @@ class TodoApp:
         if d["kind"] == "move":
             self._save_window_cfg()
         elif d["kind"] == "resize":
-            self.geo["x"], self.geo["y"] = self.root.winfo_x(), self.root.winfo_y()
-            self.geo["w"], self.geo["h"] = self.root.winfo_width(), self.root.winfo_height()
+            if self._req_geo:
+                self.geo["w"], self.geo["h"], self.geo["x"], self.geo["y"] = self._req_geo
             self._save_window_cfg()
             self.draw()
         elif d["kind"] == "task":
@@ -1093,7 +1169,8 @@ class TodoApp:
             x = gx + (gw - w)
         if "n" in edge:
             y = gy + (gh - h)
-        self.root.geometry("%dx%d+%d+%d" % (w, h, x, y))
+        self._req_geo = (w, h, x, y)
+        self.root.geometry("%dx%d+%d+%d" % self._req_geo)
 
     def set_opacity_from_x(self, x):
         tr = getattr(self, "_opacity_track", None)
@@ -1109,6 +1186,7 @@ class TodoApp:
     # ================================================================ 绘制
 
     def draw(self):
+        """总入口:窗体底 + 主界面层(皮肤可接管) + 弹窗/弹层(始终由主程序绘制)。"""
         c = self.canvas
         W = self.root.winfo_width()
         H = self.root.winfo_height()
@@ -1119,9 +1197,29 @@ class TodoApp:
         c.delete("all")
         self.layout = {}
 
-        rrect(c, 0, 0, W - 1, H - 1, self.m(16),
+        rrect(c, 0, 0, W - 1, H - 1, self.win_radius,
               fill=V["bg"], outline=V["border"], width=1.5)
-        rrect(c, 2, 2, W - 3, H - 3, self.m(15), fill="", outline=V["chip"], width=1)
+        rrect(c, 2, 2, W - 3, H - 3, max(0, self.win_radius - 1),
+              fill="", outline=V["chip"], width=1)
+
+        self.draw_surface()
+
+        # 弹窗层永远在主界面之上 —— 皮肤的 draw 只接管主界面,不会吞掉设置/编辑
+        if self.state["toast"]:
+            self.draw_toast()
+        if self.state["modal"] == "settings":
+            self.draw_settings()
+        elif self.state["modal"] == "edit":
+            self.draw_edit_modal()
+        elif self.state["modal"] == "prompt":
+            self.draw_prompt()
+        if self.popover:
+            self.draw_popover()
+
+    def draw_surface(self):
+        """主界面层:标题栏/进度/选项卡/列表/输入区。"""
+        c = self.canvas
+        W, H = self.W, self.H
 
         self.draw_titlebar()
         y = self.m(46)
@@ -1135,17 +1233,6 @@ class TodoApp:
         self.draw_list(*self.layout["list"])
         self.draw_composer(H)
         self.draw_scrollbar()
-
-        if self.state["toast"]:
-            self.draw_toast()
-        if self.state["modal"] == "settings":
-            self.draw_settings()
-        elif self.state["modal"] == "edit":
-            self.draw_edit_modal()
-        elif self.state["modal"] == "prompt":
-            self.draw_prompt()
-        if self.popover:
-            self.draw_popover()
 
     # ---- 标题栏 ----
 
@@ -1855,7 +1942,7 @@ class TodoApp:
         px = (W - pw) / 2
         py1 = self.m(10)
         py2 = H - self.m(10)
-        c.create_rectangle(0, 0, W, H, fill=V["bg"], outline="", tags=("sm:back",))
+        rrect(c, 0, 0, W - 1, H - 1, self.win_radius, fill=V["bg"], outline="", tags=("sm:back",))
         rrect(c, px, py1, px + pw, py2, self.m(14), fill=V["panel"],
               outline=V["line"], width=1, tags=("sm:panel",))
         pad = self.m(14)
@@ -2024,7 +2111,7 @@ class TodoApp:
         need(self.m(24))
         if ok(self.m(20)):
             bx = cx
-            bx = self.text_btn(bx, y[0], "重置窗口位置", "act:sm-resetwin") + self.m(10)
+            bx = self.text_btn(bx, y[0], "重置窗口", "act:sm-resetwin") + self.m(10)
             bx = self.text_btn(bx, y[0], "清空已完成", "act:sm-clear-done") + self.m(10)
             self.text_btn(bx, y[0], "清空回收站", "act:sm-empty-trash")
         need(self.m(28))
@@ -2065,12 +2152,14 @@ class TodoApp:
 
     def draw_edit_modal(self):
         c, V, W, H = self.canvas, self.V, self.W, self.H
-        lx, ly, lw, ly2 = self.layout["list"]
+        # 异形皮肤可能没有列表布局,给个兜底位置
+        lx, ly, lw, ly2 = self.layout.get("list") or \
+            (self.m(10), self.m(52), W - self.m(18), H - self.m(100))
         pw = min(lw - self.m(8), self.m(330))
         ph = self.m(288)
         px = lx + (lw - pw) / 2
         py = max(self.m(8), ly + (ly2 - ly - ph) / 2)
-        c.create_rectangle(0, 0, W, H, fill=V["bg"], outline="", tags=("em:back",))
+        rrect(c, 0, 0, W - 1, H - 1, self.win_radius, fill=V["bg"], outline="", tags=("em:back",))
         rrect(c, px, py, px + pw, py + ph, self.m(14), fill=V["panel"],
               outline=V["line"], width=1, tags=("em:panel",))
         pad = self.m(14)
@@ -2138,7 +2227,7 @@ class TodoApp:
         ph = self.m(124)
         px = (W - pw) / 2
         py = (H - ph) / 2
-        c.create_rectangle(0, 0, W, H, fill=V["bg"], outline="", tags=("sm:back",))
+        rrect(c, 0, 0, W - 1, H - 1, self.win_radius, fill=V["bg"], outline="", tags=("sm:back",))
         rrect(c, px, py, px + pw, py + ph, self.m(14), fill=V["panel"],
               outline=V["line"], width=1, tags=("sm:panel",))
         pad = self.m(14)

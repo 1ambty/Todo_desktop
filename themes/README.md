@@ -63,6 +63,71 @@
 
 颜色格式:`#RGB` 或 `#RRGGBB`。
 
+## 皮肤脚本(异形 UI,B 路线)
+
+配色不够用时,主题可以带一个 **Python 皮肤脚本**,直接接管界面绘制。
+三种放置方式:
+
+| 文件 | 效果 |
+| --- | --- |
+| `<id>.json` | 纯配色 |
+| `<id>.json` + `<id>.py` | 配色走 JSON,绘制钩子走脚本(推荐) |
+| `<id>.py` | 脚本自带头部元数据 `SKIN = {"id": ..., "name": ..., "vars": {...}}` |
+
+脚本里定义的钩子(全部可选,未定义的部分走默认绘制):
+
+```python
+def on_apply(app):
+    """皮肤生效时调用一次。常用:改窗体形状。"""
+    app.set_window_shape(radius=180, w=360, h=400)   # 圆角拉满 ≈ 圆形窗
+
+def draw(app):
+    """接管主界面层(异形皮肤的主入口)。
+
+    注意:只替代"主界面"(标题栏/列表/输入区那一层);
+    设置/编辑/日历/提示等弹层始终由主程序绘制在最上面,
+    所以用户永远能打开设置切回别的主题 —— 皮肤不会被自己困住。
+    需要自定义弹窗外观时,单独覆盖 draw_settings / draw_edit_modal 等即可。
+    """
+    c, V = app.canvas, app.V          # 画布与当前主题色
+    W, H = app.W, app.H
+    c.delete("all")
+    app.layout = {"tb": (0, 0, W, 40)}   # 必须给出可拖动区
+    ...                            # 随心画:圆盘/便签/角色边框...
+
+def draw_task(app, t, y, w, mode="", shadow=False):
+    """只覆盖任务卡片的画法,其余区域用默认。"""
+```
+
+可覆盖的钩子 = `TodoApp` 的绘制方法名:`draw`(整窗)、`draw_titlebar`、
+`draw_progress`、`draw_tabs`、`draw_task`、`draw_composer`、`draw_list`、
+`draw_popover`、`draw_calendar`、`draw_settings`、`draw_edit_modal`、
+`draw_toast`、`draw_scrollbar`…
+
+### 交互怎么接
+
+主程序的事件路由是**按画布标签**驱动的,皮肤画的元素挂上约定标签即可复用全部交互:
+
+| 标签 | 作用 |
+| --- | --- |
+| `act:tb` | 拖动移动窗口的区域 |
+| `act:btn-settings` / `act:btn-hide` / `act:btn-pin` / `act:btn-search` | 设置/收起/置顶/搜索 |
+| `task:<id>:check` | 点了打勾/取消(每日任务自动计连续天数) |
+| `task:<id>` | 点卡片主体(展开备注/拖拽排序) |
+| `tab:today` 等、`chip:*`、`act:add` | 选项卡/底部芯片/添加按钮 |
+
+### 约束与安全
+
+- 皮肤出错(语法/运行时)只会让该主题回退默认绘制,并在设置切换时弹提示;
+  主程序绝不崩溃;
+- 窗体是透明画布:`#FE01FE` 是抠图魔术色,皮肤绘制请避开;
+- 圆角 `radius` 之外,窗体轮廓完全由皮肤自己画(圆形/胶囊/异形都行),
+  未绘制区域天然点击穿透;
+- 切换主题即热重载皮肤;设置 → 扫描主题文件夹 可重新发现新脚本。
+
+完整示例:**圆形时钟**(`themes/clock.json` + `clock.py`)——圆盘表窗、
+进度环、任务速览、点击打勾,数据/托盘/热键全部复用。
+
 ## 设计约定
 
 - 所有图标都是矢量绘制并以当前主题色着色,插件只需给颜色;
