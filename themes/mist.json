@@ -1,0 +1,27 @@
+{
+  "id": "mist",
+  "name": "雾蓝",
+  "author": "示例",
+  "vars": {
+    "bg":          "#edf1f5",
+    "bg2":         "#f3f6f9",
+    "panel":       "#f8fafc",
+    "card":        "#f6f8fa",
+    "card_hover":  "#e9eef3",
+    "chip":        "#e3eaf1",
+    "accent_soft": "#dde7ee",
+    "accent":      "#7d98ad",
+    "accent_deep": "#5c7b93",
+    "ink":         "#3f4a56",
+    "ink_soft":    "#66727f",
+    "muted":       "#93a0ac",
+    "line":        "#d9e0e8",
+    "border":      "#c8d3dd",
+    "due":         "#a08a66",
+    "danger":      "#b98a86",
+    "ok":          "#7fa8a0",
+    "scrollbar":   "#c3cfd9",
+    "radius":      "12",
+    "title":       "待办"
+  }
+}

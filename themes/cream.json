@@ -1,0 +1,27 @@
+{
+  "id": "cream",
+  "name": "暖米",
+  "author": "示例",
+  "vars": {
+    "bg":          "#f5f1e8",
+    "bg2":         "#f9f6ef",
+    "panel":       "#fbf8f1",
+    "card":        "#faf6ee",
+    "card_hover":  "#f1ebdd",
+    "chip":        "#ede5d4",
+    "accent_soft": "#e9dfc9",
+    "accent":      "#a8926b",
+    "accent_deep": "#87714c",
+    "ink":         "#4f4639",
+    "ink_soft":    "#73685a",
+    "muted":       "#a2967f",
+    "line":        "#e4dccb",
+    "border":      "#d8cdb4",
+    "due":         "#a4765a",
+    "danger":      "#b58a7a",
+    "ok":          "#8ba07a",
+    "scrollbar":   "#d3c7ab",
+    "radius":      "14",
+    "title":       "待办"
+  }
+}

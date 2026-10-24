@@ -1,0 +1,10 @@
+# 运行时数据(个人任务/窗口状态),不入库
+data/
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统杂物
+Thumbs.db
+desktop.ini

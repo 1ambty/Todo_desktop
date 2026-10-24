@@ -1,0 +1,27 @@
+{
+  "id": "dusk",
+  "name": "暮山紫",
+  "author": "示例",
+  "vars": {
+    "bg":          "#f0edf4",
+    "bg2":         "#f5f2f8",
+    "panel":       "#faf8fc",
+    "card":        "#f8f5fb",
+    "card_hover":  "#ece7f1",
+    "chip":        "#e6e0ec",
+    "accent_soft": "#e2daeb",
+    "accent":      "#9a8fb0",
+    "accent_deep": "#776a92",
+    "ink":         "#464052",
+    "ink_soft":    "#6a6376",
+    "muted":       "#9b93a8",
+    "line":        "#e0dae7",
+    "border":      "#d2cadb",
+    "due":         "#a68a6e",
+    "danger":      "#b9868f",
+    "ok":          "#84a893",
+    "scrollbar":   "#c9c0d4",
+    "radius":      "12",
+    "title":       "待办"
+  }
+}
